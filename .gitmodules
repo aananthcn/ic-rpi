@@ -1,0 +1,6 @@
+[submodule "vhal-core"]
+	path = vhal-core
+	url = https://github.com/aananthcn/vhal-core.git
+[submodule "cluster-ui"]
+	path = cluster-ui
+	url = https://github.com/aananthcn/cluster-ui.git
