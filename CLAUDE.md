@@ -11,14 +11,14 @@ This is an integration project that assembles the instrument cluster UI stack on
 
 ## Sub-projects
 
-These are managed as git submodules under this repo:
+These are managed as git submodules under `src/` in this repo:
 
-| Sub-project    | Repository                                      | Purpose                          |
-|----------------|-------------------------------------------------|----------------------------------|
-| `vhal-core`    | https://github.com/aananthcn/vhal-core.git      | Vehicle HAL core library         |
-| `cluster-ui`   | https://github.com/aananthcn/cluster-ui.git     | Instrument cluster UI application|
+| Sub-project    | Path              | Repository                                      | Purpose                          |
+|----------------|-------------------|-------------------------------------------------|----------------------------------|
+| `vhal-core`    | `src/vhal-core`   | https://github.com/aananthcn/vhal-core.git      | Vehicle HAL core library         |
+| `cluster-ui`   | `src/cluster-ui`  | https://github.com/aananthcn/cluster-ui.git     | Instrument cluster UI application|
 
-The setup script is responsible for cloning these as submodules and keeping them registered.
+The setup script is responsible for cloning these as submodules under `src/` and keeping them registered.
 
 ---
 

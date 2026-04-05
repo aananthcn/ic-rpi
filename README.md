@@ -8,8 +8,9 @@ An integration project that assembles the instrument cluster UI stack on a Raspb
 
 ```
 ic-rpi5/
-├── vhal-core/          # Submodule: Vehicle HAL core library
-├── cluster-ui/         # Submodule: Instrument cluster UI application
+├── src/
+│   ├── vhal-core/      # Submodule: Vehicle HAL core library
+│   └── cluster-ui/     # Submodule: Instrument cluster UI application
 ├── profiles/
 │   ├── host            # Conan profile for Ubuntu host (auto-generated)
 │   └── rpi5            # Conan profile for RPi5 (auto-generated, not committed)
@@ -19,7 +20,8 @@ ic-rpi5/
 │   ├── build.sh        # Build for host or rpi5 target
 │   ├── deploy.sh       # Copy staged outputs to /opt/car-ui
 │   └── run.sh          # Start vhal-core + cluster-ui (handles startup order)
-└── CLAUDE.md           # Project goals and architecture decisions
+├── ARCHITECTURE.md     # Component diagram and design decisions
+└── CLAUDE.md           # Project goals and AI assistant context
 ```
 
 ---

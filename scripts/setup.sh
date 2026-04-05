@@ -110,6 +110,7 @@ setup_submodules() {
     info "Setting up git submodules..."
 
     cd "${PROJECT_ROOT}"
+    mkdir -p src
 
     for entry in "${SUBMODULES[@]}"; do
         local name="${entry%%|*}"
@@ -119,7 +120,7 @@ setup_submodules() {
             info "Submodule '${name}' already registered."
         else
             info "Registering submodule '${name}' from ${url}..."
-            git submodule add "${url}" "${name}"
+            git submodule add "${url}" "src/${name}"
         fi
     done
 

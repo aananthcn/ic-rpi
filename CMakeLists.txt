@@ -89,7 +89,7 @@ endif()
 #   include/               <- public headers
 # ──────────────────────────────────────────────────────────────────────────────
 ExternalProject_Add(vhal-core
-    SOURCE_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/vhal-core
+    SOURCE_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/src/vhal-core
     BINARY_DIR  ${CMAKE_CURRENT_BINARY_DIR}/vhal-core
     INSTALL_DIR ${CMAKE_INSTALL_PREFIX}
     CMAKE_ARGS
@@ -113,7 +113,7 @@ ExternalProject_Add(vhal-core
 #   assets/images/         <- SVG icons
 # ──────────────────────────────────────────────────────────────────────────────
 ExternalProject_Add(cluster-ui
-    SOURCE_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/cluster-ui
+    SOURCE_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/src/cluster-ui
     BINARY_DIR  ${CMAKE_CURRENT_BINARY_DIR}/cluster-ui
     INSTALL_DIR ${CMAKE_INSTALL_PREFIX}
     CMAKE_ARGS
