@@ -15,7 +15,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 DEPLOY_ROOT="/opt/car-ui"
 VHAL_BIN="${DEPLOY_ROOT}/bin/vhal-core"
-UI_BIN="${DEPLOY_ROOT}/bin/cluster-ui"
+VHAL_GTW="${DEPLOY_ROOT}/bin/vhal-gateway"
+ICUI_BIN="${DEPLOY_ROOT}/bin/cluster-ui"
 
 RPI5_IP="${RPI5_IP:-192.168.10.10}"
 RPI5_USER="${USER}"
@@ -83,27 +84,35 @@ fi
 # ---------------------------------------------------------------------------
 run_host() {
     [[ -x "$VHAL_BIN" ]] || fail "${VHAL_BIN} not found. Run ./scripts/deploy.sh --target host first."
-    [[ -x "$UI_BIN"   ]] || fail "${UI_BIN} not found. Run ./scripts/deploy.sh --target host first."
+    [[ -x "$ICUI_BIN" ]] || fail "${ICUI_BIN} not found. Run ./scripts/deploy.sh --target host first."
+    [[ -x "$VHAL_GTW" ]] || fail "${VHAL_GTW} not found. Run ./scripts/deploy.sh --target host first."
 
     info "Starting vhal-core ..."
     "${VHAL_BIN}" &
-    VHAL_PID=$!
-    success "vhal-core started (PID ${VHAL_PID})"
+    VHAL_BIN_PID=$!
+    success "vhal-core started (PID ${VHAL_BIN_PID})"
 
     # Give the gRPC server a moment to bind before the client connects
     sleep 1
 
+    info "Starting vhal-gateway ..."
+    "${VHAL_GTW}" &
+    VHAL_GTW_PID=$!
+    success "vhal-core started (PID ${VHAL_GTW_PID})"
+
     cleanup() {
         echo
-        info "Stopping cluster-ui and vhal-core ..."
-        kill "$VHAL_PID" 2>/dev/null || true
-        wait "$VHAL_PID" 2>/dev/null || true
+        info "Stopping cluster-ui, vhal-gateway and vhal-core ..."
+        kill "$VHAL_BIN_PID" 2>/dev/null || true
+        wait "$VHAL_BIN_PID" 2>/dev/null || true
+        kill "$VHAL_GTW_PID" 2>/dev/null || true
+        wait "$VHAL_GTW_PID" 2>/dev/null || true
         success "Stopped."
     }
     trap cleanup EXIT INT TERM
 
     info "Starting cluster-ui (QT_QPA_PLATFORM=${QT_PLATFORM}) ..."
-    QT_QPA_PLATFORM="${QT_PLATFORM}" "${UI_BIN}"
+    QT_QPA_PLATFORM="${QT_PLATFORM}" "${ICUI_BIN}"
     # cluster-ui exiting (normally or via Ctrl-C) falls through to cleanup above.
 }
 
@@ -132,29 +141,38 @@ run_rpi5() {
     ssh "${RPI5_USER}@${RPI5_IP}" \
         "[[ -x '${VHAL_BIN}' ]] || { echo '[ERROR] ${VHAL_BIN} not found on RPi5. Run deploy.sh first.' >&2; exit 1; }"
     ssh "${RPI5_USER}@${RPI5_IP}" \
-        "[[ -x '${UI_BIN}'   ]] || { echo '[ERROR] ${UI_BIN} not found on RPi5. Run deploy.sh first.' >&2; exit 1; }"
+        "[[ -x '${ICUI_BIN}' ]] || { echo '[ERROR] ${ICUI_BIN} not found on RPi5. Run deploy.sh first.' >&2; exit 1; }"
+    ssh "${RPI5_USER}@${RPI5_IP}" \
+        "[[ -x '${VHAL_GTW}' ]] || { echo '[ERROR] ${VHAL_GTW} not found on RPi5. Run deploy.sh first.' >&2; exit 1; }"
 
     # Start vhal-core in the background on the device, capture its PID
     info "Starting vhal-core on RPi5 ..."
-    REMOTE_VHAL_PID=$(ssh "${RPI5_USER}@${RPI5_IP}" \
+    REMOTE_VHAL_BIN_PID=$(ssh "${RPI5_USER}@${RPI5_IP}" \
         "nohup '${VHAL_BIN}' >/tmp/vhal-core.log 2>&1 & echo \$!")
-    success "vhal-core started on RPi5 (PID ${REMOTE_VHAL_PID})"
+    success "vhal-core started on RPi5 (PID ${REMOTE_VHAL_BIN_PID})"
 
     sleep 1
 
+    info "Starting vhal-gateway on RPi5 ..."
+    REMOTE_VHAL_GTW_PID=$(ssh "${RPI5_USER}@${RPI5_IP}" \
+        "nohup '${VHAL_GTW}' >/tmp/vhal-core.log 2>&1 & echo \$!")
+    success "vhal-core started on RPi5 (PID ${REMOTE_VHAL_GTW_PID})"
+
     cleanup_rpi5() {
         echo
-        info "Stopping vhal-core on RPi5 (PID ${REMOTE_VHAL_PID}) ..."
+        info "Stopping vhal-core, vhal-gateway on RPi5 (PID ${REMOTE_VHAL_BIN_PID}, ${REMOTE_VHAL_GTW_PID}) ..."
         ssh "${RPI5_USER}@${RPI5_IP}" \
-            "kill ${REMOTE_VHAL_PID} 2>/dev/null || true" 2>/dev/null || true
-        success "vhal-core stopped."
+            "kill ${REMOTE_VHAL_BIN_PID} 2>/dev/null || true" 2>/dev/null || true
+        ssh "${RPI5_USER}@${RPI5_IP}" \
+            "kill ${REMOTE_VHAL_GTW_PID} 2>/dev/null || true" 2>/dev/null || true
+        success "vhal-core, vhal-gateway are stopped."
     }
     trap cleanup_rpi5 EXIT INT TERM
 
     info "Starting cluster-ui on RPi5 (QT_QPA_PLATFORM=${QT_PLATFORM}) ..."
     info "(vhal-core log: ssh ${RPI5_USER}@${RPI5_IP} tail -f /tmp/vhal-core.log)"
     ssh -t "${RPI5_USER}@${RPI5_IP}" \
-        "QT_QPA_PLATFORM='${QT_PLATFORM}' '${UI_BIN}'"
+        "QT_QPA_PLATFORM='${QT_PLATFORM}' '${ICUI_BIN}'"
     # cluster-ui exiting falls through to cleanup_rpi5 above.
 }
 
