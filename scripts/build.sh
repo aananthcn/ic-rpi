@@ -13,8 +13,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PROFILES_DIR="${PROJECT_ROOT}/profiles"
-BUILD_DIR="${PROJECT_ROOT}/build"
-STAGE_DIR="${BUILD_DIR}/install"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -43,13 +41,17 @@ usage() {
 # ---------------------------------------------------------------------------
 TARGET=""
 QT_PREFIX=""
+SYSROOT=""
 JOBS=$(nproc)
+BUILD_CLUSTER_UI=""   # empty = auto; set by sysroot detection below
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --target)    TARGET="$2";    shift 2 ;;
-        --qt-prefix) QT_PREFIX="$2"; shift 2 ;;
-        --jobs)      JOBS="$2";      shift 2 ;;
+        --target)          TARGET="$2";          shift 2 ;;
+        --qt-prefix)       QT_PREFIX="$2";       shift 2 ;;
+        --sysroot)         SYSROOT="$2";         shift 2 ;;
+        --jobs)            JOBS="$2";             shift 2 ;;
+        --with-cluster-ui) BUILD_CLUSTER_UI="ON"; shift   ;;
         -h|--help)   usage ;;
         *) fail "Unknown argument: $1" ;;
     esac
@@ -61,6 +63,25 @@ case "$TARGET" in
     host|rpi5) ;;
     *) fail "Unknown target '$TARGET'. Must be 'host' or 'rpi5'." ;;
 esac
+
+
+# ---------------------------------------------------------------------------
+# Target-specific build directories
+# ---------------------------------------------------------------------------
+case "$TARGET" in
+    host) TARGET_DIR="pc" ;;
+    rpi5) TARGET_DIR="rpi5" ;;
+esac
+
+BUILD_ROOT="${PROJECT_ROOT}/build/${TARGET_DIR}"
+
+CONAN_DIR="${BUILD_ROOT}/conan"
+CMAKE_BUILD_DIR="${BUILD_ROOT}/build"
+STAGE_DIR="${BUILD_ROOT}/install"
+FULL_DEPLOY_DIR="${CONAN_DIR}/full_deploy"
+
+mkdir -p "${BUILD_ROOT}"
+
 
 PROFILE="${PROFILES_DIR}/${TARGET}"
 [[ -f "$PROFILE" ]] || fail "Conan profile not found: ${PROFILE}. Run ./scripts/setup.sh first."
@@ -157,7 +178,7 @@ detect_qt
 info "Running conan install for target '${TARGET}'..."
 
 conan install "${PROJECT_ROOT}" \
-    --output-folder="${BUILD_DIR}" \
+    --output-folder="${CONAN_DIR}" \
     --deployer=full_deploy \
     --build=missing \
     --profile="${PROFILE}"
@@ -165,26 +186,91 @@ conan install "${PROJECT_ROOT}" \
 success "Conan install complete."
 
 # ---------------------------------------------------------------------------
+# Step 1b: load the Conan build environment
+#
+# conanbuild.sh adds the BUILD-context bin dirs (x86_64 protoc, grpc_cpp_plugin)
+# to PATH.  This is essential for cross-compilation: the Conan cmake modules for
+# protobuf and gRPC search PATH first for these tools, and fall back to the
+# target-arch binary (armv8) which cannot run on the build machine.
+# For native host builds this is a no-op (same-arch binaries, PATH already set).
+# ---------------------------------------------------------------------------
+if [[ -f "${CONAN_DIR}/conanbuild.sh" ]]; then
+    # shellcheck disable=SC1090
+    source "${CONAN_DIR}/conanbuild.sh"
+    info "Conan build environment loaded (conanbuild.sh)."
+fi
+
+# ---------------------------------------------------------------------------
 # Step 2: cmake configure
 # ---------------------------------------------------------------------------
 info "Configuring cmake (staging: ${STAGE_DIR})..."
 
-CMAKE_EXTRA_ARGS=()
-if [[ -n "$QT_PREFIX" ]]; then
-    CMAKE_EXTRA_ARGS+=("-DCMAKE_PREFIX_PATH=${QT_PREFIX}")
-    # Also pin Qt6_DIR directly so CMake cannot accidentally pick up a system
-    # Qt 6.2.x (from apt) instead of the installer Qt when both are present.
-    # CMAKE_PREFIX_PATH alone is not sufficient because CMake's system package
-    # registry and built-in search paths may still take precedence.
-    Qt6_CONFIG="${QT_PREFIX}/lib/cmake/Qt6/Qt6Config.cmake"
-    if [[ -f "$Qt6_CONFIG" ]]; then
-        CMAKE_EXTRA_ARGS+=("-DQt6_DIR=${QT_PREFIX}/lib/cmake/Qt6")
-        info "Qt6_DIR pinned to: ${QT_PREFIX}/lib/cmake/Qt6"
+# ---------------------------------------------------------------------------
+# Sysroot detection (rpi5 only)
+#
+# Cross-compiling Qt apps requires a target-filesystem sysroot so the
+# cross-linker can find OpenGL, EGL, and other RPi5 libraries.
+# Default location: ~/sdk/rpi5/root  (copy of the live RPi5 /usr tree).
+# Override with: --sysroot <path>
+# ---------------------------------------------------------------------------
+if [[ "$TARGET" == "rpi5" && -z "$SYSROOT" ]]; then
+    DEFAULT_SYSROOT="${HOME}/sdk/rpi5/root"
+    if [[ -d "$DEFAULT_SYSROOT" ]]; then
+        SYSROOT="$DEFAULT_SYSROOT"
+        info "RPi5 sysroot auto-detected: ${SYSROOT}"
     fi
 fi
 
-cmake -B "${BUILD_DIR}" \
-    -DCMAKE_TOOLCHAIN_FILE="${BUILD_DIR}/conan_toolchain.cmake" \
+# Expand leading ~ (in case the user passed --sysroot "~/...")
+SYSROOT="${SYSROOT/#\~/$HOME}"
+
+# Decide whether to build cluster-ui
+if [[ -z "$BUILD_CLUSTER_UI" ]]; then
+    case "$TARGET" in
+        host) BUILD_CLUSTER_UI="ON" ;;
+        rpi5) [[ -n "$SYSROOT" ]] && BUILD_CLUSTER_UI="ON" || BUILD_CLUSTER_UI="OFF" ;;
+    esac
+fi
+
+[[ "$BUILD_CLUSTER_UI" == "ON" ]] \
+    && info "cluster-ui: enabled" \
+    || warn "cluster-ui: disabled (no sysroot found — pass --sysroot <path> to enable)"
+
+# ---------------------------------------------------------------------------
+# CMake extra args
+# ---------------------------------------------------------------------------
+CMAKE_EXTRA_ARGS=("-DBUILD_CLUSTER_UI=${BUILD_CLUSTER_UI}")
+
+if [[ "$TARGET" == "rpi5" && -n "$SYSROOT" ]]; then
+    # Cross-compilation: Qt lives in the sysroot, host tools come from gcc_64 kit.
+    SYSROOT_QT="${SYSROOT}/usr/lib/aarch64-linux-gnu/cmake/Qt6"
+    if [[ -f "${SYSROOT_QT}/Qt6Config.cmake" ]]; then
+        CMAKE_EXTRA_ARGS+=("-DQt6_DIR=${SYSROOT_QT}")
+        info "Qt6 target (sysroot): ${SYSROOT_QT}"
+    fi
+    # Pass as RPI5_SYSROOT, not CMAKE_SYSROOT, so the superbuild itself does not
+    # search for host build tools (ninja, make) inside the sysroot.
+    CMAKE_EXTRA_ARGS+=("-DRPI5_SYSROOT=${SYSROOT}")
+    # QT_HOST_PATH: x86_64 Qt kit that provides moc, rcc, uic, qmlcachegen.
+    # detect_qt() has already set QT_PREFIX to the gcc_64 installation.
+    if [[ -n "$QT_PREFIX" ]]; then
+        CMAKE_EXTRA_ARGS+=("-DQT_HOST_PATH=${QT_PREFIX}")
+        info "QT_HOST_PATH (host tools): ${QT_PREFIX}"
+    fi
+else
+    # Native host build: pin Qt6_DIR so system Qt 6.2.x (apt) is not picked up.
+    if [[ -n "$QT_PREFIX" ]]; then
+        CMAKE_EXTRA_ARGS+=("-DCMAKE_PREFIX_PATH=${QT_PREFIX}")
+        Qt6_CONFIG="${QT_PREFIX}/lib/cmake/Qt6/Qt6Config.cmake"
+        if [[ -f "$Qt6_CONFIG" ]]; then
+            CMAKE_EXTRA_ARGS+=("-DQt6_DIR=${QT_PREFIX}/lib/cmake/Qt6")
+            info "Qt6_DIR pinned to: ${QT_PREFIX}/lib/cmake/Qt6"
+        fi
+    fi
+fi
+
+cmake -B "${CMAKE_BUILD_DIR}" \
+    -DCMAKE_TOOLCHAIN_FILE="${CONAN_DIR}/conan_toolchain.cmake" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="${STAGE_DIR}" \
     "${CMAKE_EXTRA_ARGS[@]}" \
@@ -196,14 +282,14 @@ success "CMake configure complete."
 # Step 3: cmake build
 # ---------------------------------------------------------------------------
 info "Building (jobs: ${JOBS})..."
-cmake --build "${BUILD_DIR}" --parallel "${JOBS}"
+cmake --build "${CMAKE_BUILD_DIR}" --parallel "${JOBS}"
 success "Build complete."
 
 # ---------------------------------------------------------------------------
 # Step 4: stage — install project artifacts into ./build/install/
 # ---------------------------------------------------------------------------
 info "Staging build outputs to ${STAGE_DIR}..."
-cmake --install "${BUILD_DIR}"
+cmake --install "${CMAKE_BUILD_DIR}"
 success "Project artifacts staged."
 
 # ---------------------------------------------------------------------------
@@ -218,7 +304,6 @@ success "Project artifacts staged."
 # Symlinks are preserved (-P) so versioned .so chains (libfoo.so →
 # libfoo.so.1 → libfoo.so.1.2.3) arrive intact on the target.
 # ---------------------------------------------------------------------------
-FULL_DEPLOY_DIR="${BUILD_DIR}/full_deploy"
 LIB_STAGE="${STAGE_DIR}/lib"
 mkdir -p "${LIB_STAGE}"
 
@@ -249,3 +334,14 @@ echo "  assets/ — fonts and icons"
 echo
 echo "To deploy to /opt/car-ui run:"
 echo "  ./scripts/deploy.sh --target ${TARGET}"
+
+if [[ "$TARGET" == "rpi5" && "$BUILD_CLUSTER_UI" == "OFF" ]]; then
+    echo
+    warn "cluster-ui was NOT built (no RPi5 sysroot found on this machine)."
+    echo "  To enable cross-compilation of cluster-ui:"
+    echo "    1. Create a sysroot by copying the RPi5 filesystem:"
+    echo "         mkdir -p ~/sdk/rpi5/root"
+    echo "         rsync -av --rsync-path='sudo rsync' ${USER}@192.168.10.10:/usr ~/sdk/rpi5/root/"
+    echo "         rsync -av --rsync-path='sudo rsync' ${USER}@192.168.10.10:/lib ~/sdk/rpi5/root/"
+    echo "    2. Re-run this script (sysroot is auto-detected at ~/sdk/rpi5/root)."
+fi

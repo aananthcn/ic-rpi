@@ -12,7 +12,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-STAGE_DIR="${PROJECT_ROOT}/build/install"
+BUILD_ROOT="${PROJECT_ROOT}/build"
 DEPLOY_ROOT="/opt/car-ui"
 RPI5_IP="${RPI5_IP:-192.168.10.10}"
 RPI5_USER="${USER}"
@@ -54,6 +54,18 @@ case "$TARGET" in
     host|rpi5) ;;
     *) fail "Unknown target '$TARGET'. Must be 'host' or 'rpi5'." ;;
 esac
+
+
+# ---------------------------------------------------------------------------
+# Target-specific staging directory (matches build.sh layout)
+# ---------------------------------------------------------------------------
+case "$TARGET" in
+    host) TARGET_DIR="pc" ;;
+    rpi5) TARGET_DIR="rpi5" ;;
+esac
+
+STAGE_DIR="${BUILD_ROOT}/${TARGET_DIR}/install"
+
 
 # ---------------------------------------------------------------------------
 # Pre-flight: verify staging area exists and has content

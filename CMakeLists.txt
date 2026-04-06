@@ -57,21 +57,78 @@ if(CMAKE_TOOLCHAIN_FILE)
     )
 endif()
 
-# Forward Qt location if the caller provided one (needed by cluster-ui since
-# Qt is NOT managed by Conan).
-if(CMAKE_PREFIX_PATH)
-    list(APPEND _COMMON_CMAKE_ARGS
-        "-DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}"
-    )
-endif()
+# ── cluster-ui Qt args ────────────────────────────────────────────────────────
+# Qt is not managed by Conan.  The args below are forwarded only to cluster-ui.
+#
+# Native (host) build:
+#   CMAKE_PREFIX_PATH / Qt6_DIR  — point cmake at the installer Qt kit.
+#
+# Cross-compilation (rpi5 with sysroot):
+#   CMAKE_SYSROOT   — target filesystem root; the cross-compiler and all
+#                     find_library/find_package calls search here for target libs
+#                     (OpenGL, EGL, Qt libraries, etc.)
+#   QT_HOST_PATH    — Qt host-tools installation (moc, rcc, uic, qmlcachegen);
+#                     must match the same major.minor as the target Qt.
+#   Qt6_DIR         — pinned path to the target Qt cmake config dir inside the
+#                     sysroot, bypassing any system search-path ambiguity.
+set(_CLUSTER_UI_QT_ARGS)
 
-# Pin Qt6_DIR explicitly so CMake cannot shadow the installer Qt with a
-# system-installed Qt 6.2.x (apt).  CMAKE_PREFIX_PATH alone is not sufficient
-# because CMake's built-in system search paths may resolve first.
+if(CMAKE_PREFIX_PATH)
+    list(APPEND _CLUSTER_UI_QT_ARGS "-DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}")
+endif()
 if(Qt6_DIR)
-    list(APPEND _COMMON_CMAKE_ARGS
-        "-DQt6_DIR=${Qt6_DIR}"
-    )
+    list(APPEND _CLUSTER_UI_QT_ARGS "-DQt6_DIR=${Qt6_DIR}")
+endif()
+if(QT_HOST_PATH)
+    list(APPEND _CLUSTER_UI_QT_ARGS "-DQT_HOST_PATH=${QT_HOST_PATH}")
+endif()
+# RPI5_SYSROOT is a forwarding variable — we intentionally do NOT set
+# CMAKE_SYSROOT at the superbuild level because that would cause CMake to
+# search for build tools (ninja, make) inside the sysroot and find armv8
+# binaries that cannot run on the host.  Only cluster-ui's sub-cmake gets
+# CMAKE_SYSROOT, where the cross-compiler can use it correctly.
+if(RPI5_SYSROOT)
+    list(APPEND _CLUSTER_UI_QT_ARGS "-DCMAKE_SYSROOT=${RPI5_SYSROOT}")
+    # The Conan toolchain sets CMAKE_FIND_ROOT_PATH_MODE_PROGRAM=BOTH, which
+    # makes cmake search the sysroot for build tools (make, ninja, moc) before
+    # the host paths — and picks up armv8 binaries that cannot run.
+    # Override to NEVER so host programs are always used.
+    list(APPEND _CLUSTER_UI_QT_ARGS "-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER")
+    # Explicitly forward the host make/ninja program so the cluster-ui cmake
+    # compiler test does not fall back to searching PATH.
+    list(APPEND _CLUSTER_UI_QT_ARGS "-DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}")
+    # Force the linker to search the sysroot lib dirs BEFORE the host
+    # cross-toolchain stubs.  Without this, the Ubuntu 22.04 cross-toolchain's
+    # glibc 2.35 libc.so.6 is used for symbol resolution, causing
+    # "undefined reference to foo@GLIBC_2.36+" errors.
+    #
+    # The sysroot's GCC lib dir (e.g. usr/lib/gcc/aarch64-linux-gnu/14) must
+    # come first: it contains the unversioned libstdc++.so linker stub that
+    # the linker uses to resolve -lstdc++.  The host cross-compiler's own stub
+    # (gcc-cross/aarch64-linux-gnu/11/libstdc++.so) only provides GLIBCXX up
+    # to 3.4.30, whereas the sysroot Qt libraries need 3.4.32+.
+    #
+    # Auto-detect the highest GCC version installed in the sysroot.
+    file(GLOB _SYSROOT_GCC_DIRS
+        "${RPI5_SYSROOT}/usr/lib/gcc/aarch64-linux-gnu/[0-9]*")
+    if(_SYSROOT_GCC_DIRS)
+        list(SORT _SYSROOT_GCC_DIRS ORDER DESCENDING)
+        list(GET _SYSROOT_GCC_DIRS 0 _SYSROOT_GCC_LIB_DIR)
+        message(STATUS "Sysroot GCC lib dir : ${_SYSROOT_GCC_LIB_DIR}")
+    else()
+        set(_SYSROOT_GCC_LIB_DIR "")
+        message(WARNING "No GCC lib dir found in sysroot — libstdc++ symbol resolution may fail")
+    endif()
+
+    set(_SYSROOT_LIBDIRS "")
+    if(_SYSROOT_GCC_LIB_DIR)
+        string(APPEND _SYSROOT_LIBDIRS "-L${_SYSROOT_GCC_LIB_DIR} ")
+    endif()
+    string(APPEND _SYSROOT_LIBDIRS
+        "-L${RPI5_SYSROOT}/lib/aarch64-linux-gnu -L${RPI5_SYSROOT}/usr/lib/aarch64-linux-gnu")
+    list(APPEND _CLUSTER_UI_QT_ARGS "-DCMAKE_EXE_LINKER_FLAGS=${_SYSROOT_LIBDIRS}")
+    list(APPEND _CLUSTER_UI_QT_ARGS "-DCMAKE_SHARED_LINKER_FLAGS=${_SYSROOT_LIBDIRS}")
+    list(APPEND _CLUSTER_UI_QT_ARGS "-DCMAKE_MODULE_LINKER_FLAGS=${_SYSROOT_LIBDIRS}")
 endif()
 
 # ── vhal-core ─────────────────────────────────────────────────────────────────
@@ -106,21 +163,33 @@ ExternalProject_Add(vhal-core
 # cluster-ui brings in vhal-types and vhal-ipc-grpc via its own
 # add_subdirectory() so it compiles what it needs independently.
 #
+# Cross-compiling Qt apps requires a Qt kit built for the target architecture.
+# When building for RPi5 from a host machine, no such kit is available — the
+# Qt installer only provides host (x86_64) kits here.  Set BUILD_CLUSTER_UI=OFF
+# to skip this step; build cluster-ui natively on the RPi5 instead.
+#
 # Staging layout (./build/install/):
 #   bin/cluster-ui         <- Qt application executable
 #   qml/                   <- QML source files (loaded at runtime)
 #   assets/fonts/          <- custom fonts
 #   assets/images/         <- SVG icons
 # ──────────────────────────────────────────────────────────────────────────────
-ExternalProject_Add(cluster-ui
-    SOURCE_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/src/cluster-ui
-    BINARY_DIR  ${CMAKE_CURRENT_BINARY_DIR}/cluster-ui
-    INSTALL_DIR ${CMAKE_INSTALL_PREFIX}
-    CMAKE_ARGS
-        ${_COMMON_CMAKE_ARGS}
-    BUILD_ALWAYS ON
-    USES_TERMINAL_BUILD ON
-    # cluster-ui links against vhal-core targets; build vhal-core first so
-    # the generated proto/grpc headers are present when cluster-ui configures.
-    DEPENDS vhal-core
-)
+option(BUILD_CLUSTER_UI "Build cluster-ui (requires a Qt kit for the target arch)" ON)
+
+if(BUILD_CLUSTER_UI)
+    ExternalProject_Add(cluster-ui
+        SOURCE_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/src/cluster-ui
+        BINARY_DIR  ${CMAKE_CURRENT_BINARY_DIR}/cluster-ui
+        INSTALL_DIR ${CMAKE_INSTALL_PREFIX}
+        CMAKE_ARGS
+            ${_COMMON_CMAKE_ARGS}
+            ${_CLUSTER_UI_QT_ARGS}
+        BUILD_ALWAYS ON
+        USES_TERMINAL_BUILD ON
+        # cluster-ui links against vhal-core targets; build vhal-core first so
+        # the generated proto/grpc headers are present when cluster-ui configures.
+        DEPENDS vhal-core
+    )
+else()
+    message(STATUS "BUILD_CLUSTER_UI=OFF — skipping cluster-ui (build natively on the target device)")
+endif()
