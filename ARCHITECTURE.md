@@ -21,22 +21,52 @@
 ## Runtime Architecture
 
 ```
-  ┌──────────────────────┐        gRPC (localhost)
-  │   vhal-core          │ ◄──────────────────────────┐
-  │  (HAL gRPC server)   │                            │
-  │                      │  Vehicle signal updates    │
-  │  Reads:              │  (speed, rpm, fuel, etc.)  │
-  │  /opt/car-ui/etc/    │                            │
-  │  vhal/Default        │                       ┌────┴──────────────┐
-  │  Properties.json     │                       │   cluster-ui      │
-  └──────────────────────┘                       │  (Qt6/QML client) │
-                                                 │                   │
-                                                 │  Renders on:      │
-                                                 │  host → xcb       │
-                                                 │  rpi5 → wayland   │
-                                                 │         or eglfs  │
-                                                 └───────────────────┘
+  ┌──────────────────────┐        gRPC (localhost:50051)
+  │   vhal-core          │ ◄──────────────────────────────────┐
+  │  (HAL gRPC server)   │                                    │
+  │                      │  Vehicle signal updates            │
+  │  Reads:              │  (speed, rpm, fuel, gear, etc.)    │
+  │  /opt/car-ui/etc/    │                                    │
+  │  vhal/Default        │                         ┌──────────┴──────────────┐
+  │  Properties.json     │                         │      cluster-ui         │
+  └──────────────────────┘                         │    (Qt6/QML client)     │
+                                                   │                         │
+  ┌──────────────────────┐   RTP/UDP (port 5004)   │  VehicleBridge          │
+  │  rvc-app / Android   │ ──────────────────────► │    ↓ DriveMode::REVERSE │
+  │  (camera source)     │   H.264, payload 96     │  RvcStreamHandler       │
+  │                      │                         │    ↓ GStreamer pipeline  │
+  └──────────────────────┘                         │    ↓ QVideoSink frames  │
+                                                   │  PipOverlay (QML)       │
+                                                   │                         │
+                                                   │  Renders on:            │
+                                                   │  host → xcb             │
+                                                   │  rpi5 → wayland         │
+                                                   │         or eglfs        │
+                                                   └─────────────────────────┘
 ```
+
+### RVC Stream Path (Reverse Gear)
+
+When the gear changes to `GEAR_REVERSE`, `VehicleBridge` emits `stateChanged` with
+`driveMode == DriveMode::REVERSE`. `main.cpp` connects this to `RvcStreamHandler::start()`,
+which builds and starts a GStreamer pipeline:
+
+```
+udpsrc (port 5004)
+  → rtph264depay
+  → h264parse
+  → avdec_h264          (software; swap for v4l2h264dec for RPi5 HW decode)
+  → videoconvert
+  → video/x-raw,format=RGBA
+  → appsink             (pulls frames into Qt via QVideoSink)
+```
+
+Decoded RGBA frames arrive on GStreamer's internal streaming thread. Each frame is
+deep-copied into a `QByteArray`, then marshalled to the Qt main thread via
+`QMetaObject::invokeMethod(Qt::QueuedConnection)` before being pushed to
+`QVideoSink::setVideoFrame()`. The QML `VideoOutput` in `PipOverlay.qml` renders
+the frames in the PiP window. On gear exit from Reverse, `RvcStreamHandler::stop()`
+tears down the pipeline.
 
 ## Build Architecture
 
@@ -76,7 +106,8 @@ This means `build.sh` is always unprivileged and repeatable, while `deploy.sh` i
 | Dependency | How managed |
 |------------|-------------|
 | gRPC, Protobuf, jsoncpp, abseil, re2, c-ares, zlib, OpenSSL | Conan 2.x (static libs) |
-| Qt6 | Qt Online Installer — **not** managed by Conan |
+| Qt6 (Core, Quick, QML, Multimedia, MultimediaQuick) | Qt Online Installer — **not** managed by Conan |
+| GStreamer (gstreamer-1.0, gstreamer-app-1.0, gstreamer-video-1.0) | System package manager (`apt`); detected via `pkg-config` at CMake configure time |
 | vhal-core, cluster-ui | Git submodules under `src/` |
 
 Conan dependencies are built as **static libraries**, so the deployed binaries have no external Conan `.so` dependencies at runtime. Qt shared libraries are located via the RPATH baked into the binary at build time (`CMAKE_INSTALL_RPATH_USE_LINK_PATH=ON`).
