@@ -155,7 +155,7 @@ run_rpi5() {
 
     info "Starting vhal-gateway on RPi5 ..."
     REMOTE_VHAL_GTW_PID=$(ssh "${RPI5_USER}@${RPI5_IP}" \
-        "nohup '${VHAL_GTW}' >/tmp/vhal-core.log 2>&1 & echo \$!")
+        "nohup '${VHAL_GTW}' >/tmp/vhal-gateway.log 2>&1 & echo \$!")
     success "vhal-core started on RPi5 (PID ${REMOTE_VHAL_GTW_PID})"
 
     cleanup_rpi5() {

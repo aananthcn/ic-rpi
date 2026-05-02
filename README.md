@@ -37,6 +37,24 @@ Both are managed as git submodules. `setup.sh` registers and clones them automat
 
 ---
 
+## Android RVC Pipeline (counterpart)
+
+The Instrument Cluster receives a live rear-view camera stream from the Android
+Automotive OS (AAOS) side running on the same board. That pipeline is a separate
+set of modules built inside the AOSP tree:
+
+| Module | Role |
+|---|---|
+| `rvc_service` | Monitors VHAL `GEAR_SELECTION` via HIDL; signals gear state |
+| `rvc_app` | Opens Camera2, encodes H.264, streams RTP/UDP → `192.168.10.10:5004`; also renders live feed on the IVI display |
+| `rvc_evs_shim` | No-op APK that satisfies the CarEvsService watchdog without holding the camera |
+| `CarServiceRpiOverlay` | Resource overlay that redirects CarEvsService to `rvc_evs_shim` instead of the default preview activity |
+
+For build instructions, clone paths, and integration details see the
+**[rvc_app README](https://github.com/aananthcn/rvc-app/blob/main/README.md)**.
+
+---
+
 ## Build Targets
 
 | Target | Description                                      |

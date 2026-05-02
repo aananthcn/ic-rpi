@@ -151,9 +151,10 @@ ExternalProject_Add(vhal-core
     INSTALL_DIR ${CMAKE_INSTALL_PREFIX}
     CMAKE_ARGS
         ${_COMMON_CMAKE_ARGS}
-        # Runtime config path baked into the binary — must match the deployed
-        # location, not the staging location.
+        # Runtime config paths baked into the binaries — must match the deployed
+        # location, not the staging or source location.
         -DVHAL_CONFIG_ROOT=${CAR_UI_RUNTIME_PREFIX}/etc/vhal
+        -DGATEWAY_CONFIG_ROOT=${CAR_UI_RUNTIME_PREFIX}/etc/vhal
     BUILD_ALWAYS ON
     USES_TERMINAL_BUILD ON
 )
