@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# build.sh — Build ic-rpi5 for a given target
+# build.sh — Build ic-rpi for a given target
 #
 # Outputs land in ./build/install/ (staging area).
-# To push them to /opt/car-ui run: ./scripts/deploy.sh --target <host|rpi5>
+# To push them to /opt/car-ui run: ./scripts/deploy.sh --target <pc|rpi>
 #
 # Usage:
-#   ./scripts/build.sh --target host    # Ubuntu Linux host
-#   ./scripts/build.sh --target rpi5    # Raspberry Pi 5
+#   ./scripts/build.sh --target pc    # Ubuntu Linux pc
+#   ./scripts/build.sh --target rpi    # Raspberry Pi 4/5
 
 set -euo pipefail
 
@@ -23,16 +23,16 @@ warn()    { echo "[WARN]  $*"; }
 fail()    { echo "[ERROR] $*" >&2; exit 1; }
 
 usage() {
-    echo "Usage: $0 --target <host|rpi5> [--qt-prefix <path>] [--jobs <N>]"
+    echo "Usage: $0 --target <pc|rpi> [--qt-prefix <path>] [--jobs <N>]"
     echo
-    echo "  --target     host  : build for Ubuntu Linux host"
-    echo "               rpi5  : build for Raspberry Pi 5"
+    echo "  --target     pc  : build for Ubuntu Linux pc"
+    echo "               rpi  : build for Raspberry Pi 5"
     echo "  --qt-prefix  <path>: path to Qt cmake dir (e.g. /usr/lib/x86_64-linux-gnu/cmake)"
     echo "                       required only if Qt is not on the default cmake search path"
     echo "  --jobs       <N>   : parallel build jobs (default: nproc)"
     echo
     echo "Build outputs are staged to: ./build/install/"
-    echo "To deploy run: ./scripts/deploy.sh --target <host|rpi5>"
+    echo "To deploy run: ./scripts/deploy.sh --target <pc|rpi>"
     exit 1
 }
 
@@ -60,8 +60,8 @@ done
 [[ -z "$TARGET" ]] && usage
 
 case "$TARGET" in
-    host|rpi5) ;;
-    *) fail "Unknown target '$TARGET'. Must be 'host' or 'rpi5'." ;;
+    pc|rpi) ;;
+    *) fail "Unknown target '$TARGET'. Must be 'pc' or 'rpi'." ;;
 esac
 
 
@@ -69,8 +69,8 @@ esac
 # Target-specific build directories
 # ---------------------------------------------------------------------------
 case "$TARGET" in
-    host) TARGET_DIR="pc" ;;
-    rpi5) TARGET_DIR="rpi5" ;;
+    pc) TARGET_DIR="pc" ;;
+    rpi) TARGET_DIR="rpi" ;;
 esac
 
 BUILD_ROOT="${PROJECT_ROOT}/build/${TARGET_DIR}"
@@ -91,7 +91,7 @@ PROFILE="${PROFILES_DIR}/${TARGET}"
 #
 # CMAKE_PREFIX_PATH must contain the Qt6 library dir so cluster-ui's
 # find_package(Qt6) succeeds.  Qt is NOT managed by Conan — it is expected
-# to be installed on the host (apt) or cross-sysroot (rpi5).
+# to be installed on the pc (apt) or cross-sysroot (rpi).
 #
 # Detection order:
 #   1. --qt-prefix supplied by the user  → use as-is
@@ -192,7 +192,7 @@ success "Conan install complete."
 # to PATH.  This is essential for cross-compilation: the Conan cmake modules for
 # protobuf and gRPC search PATH first for these tools, and fall back to the
 # target-arch binary (armv8) which cannot run on the build machine.
-# For native host builds this is a no-op (same-arch binaries, PATH already set).
+# For native pc builds this is a no-op (same-arch binaries, PATH already set).
 # ---------------------------------------------------------------------------
 if [[ -f "${CONAN_DIR}/conanbuild.sh" ]]; then
     # shellcheck disable=SC1090
@@ -206,18 +206,18 @@ fi
 info "Configuring cmake (staging: ${STAGE_DIR})..."
 
 # ---------------------------------------------------------------------------
-# Sysroot detection (rpi5 only)
+# Sysroot detection (rpi only)
 #
 # Cross-compiling Qt apps requires a target-filesystem sysroot so the
-# cross-linker can find OpenGL, EGL, and other RPi5 libraries.
-# Default location: ~/sdk/rpi5/root  (copy of the live RPi5 /usr tree).
+# cross-linker can find OpenGL, EGL, and other RPi libraries.
+# Default location: ~/sdk/rpi/root  (copy of the live RPi /usr tree).
 # Override with: --sysroot <path>
 # ---------------------------------------------------------------------------
-if [[ "$TARGET" == "rpi5" && -z "$SYSROOT" ]]; then
-    DEFAULT_SYSROOT="${HOME}/sdk/rpi5/root"
+if [[ "$TARGET" == "rpi" && -z "$SYSROOT" ]]; then
+    DEFAULT_SYSROOT="${HOME}/sdk/rpi/root"
     if [[ -d "$DEFAULT_SYSROOT" ]]; then
         SYSROOT="$DEFAULT_SYSROOT"
-        info "RPi5 sysroot auto-detected: ${SYSROOT}"
+        info "RPi sysroot auto-detected: ${SYSROOT}"
     fi
 fi
 
@@ -227,8 +227,8 @@ SYSROOT="${SYSROOT/#\~/$HOME}"
 # Decide whether to build cluster-ui
 if [[ -z "$BUILD_CLUSTER_UI" ]]; then
     case "$TARGET" in
-        host) BUILD_CLUSTER_UI="ON" ;;
-        rpi5) [[ -n "$SYSROOT" ]] && BUILD_CLUSTER_UI="ON" || BUILD_CLUSTER_UI="OFF" ;;
+        pc) BUILD_CLUSTER_UI="ON" ;;
+        rpi) [[ -n "$SYSROOT" ]] && BUILD_CLUSTER_UI="ON" || BUILD_CLUSTER_UI="OFF" ;;
     esac
 fi
 
@@ -241,24 +241,24 @@ fi
 # ---------------------------------------------------------------------------
 CMAKE_EXTRA_ARGS=("-DBUILD_CLUSTER_UI=${BUILD_CLUSTER_UI}")
 
-if [[ "$TARGET" == "rpi5" && -n "$SYSROOT" ]]; then
-    # Cross-compilation: Qt lives in the sysroot, host tools come from gcc_64 kit.
+if [[ "$TARGET" == "rpi" && -n "$SYSROOT" ]]; then
+    # Cross-compilation: Qt lives in the sysroot, pc tools come from gcc_64 kit.
     SYSROOT_QT="${SYSROOT}/usr/lib/aarch64-linux-gnu/cmake/Qt6"
     if [[ -f "${SYSROOT_QT}/Qt6Config.cmake" ]]; then
         CMAKE_EXTRA_ARGS+=("-DQt6_DIR=${SYSROOT_QT}")
         info "Qt6 target (sysroot): ${SYSROOT_QT}"
     fi
-    # Pass as RPI5_SYSROOT, not CMAKE_SYSROOT, so the superbuild itself does not
-    # search for host build tools (ninja, make) inside the sysroot.
-    CMAKE_EXTRA_ARGS+=("-DRPI5_SYSROOT=${SYSROOT}")
+    # Pass as RPI_SYSROOT, not CMAKE_SYSROOT, so the superbuild itself does not
+    # search for pc build tools (ninja, make) inside the sysroot.
+    CMAKE_EXTRA_ARGS+=("-DRPI_SYSROOT=${SYSROOT}")
     # QT_HOST_PATH: x86_64 Qt kit that provides moc, rcc, uic, qmlcachegen.
     # detect_qt() has already set QT_PREFIX to the gcc_64 installation.
     if [[ -n "$QT_PREFIX" ]]; then
         CMAKE_EXTRA_ARGS+=("-DQT_HOST_PATH=${QT_PREFIX}")
-        info "QT_HOST_PATH (host tools): ${QT_PREFIX}"
+        info "QT_HOST_PATH (pc tools): ${QT_PREFIX}"
     fi
 else
-    # Native host build: pin Qt6_DIR so system Qt 6.2.x (apt) is not picked up.
+    # Native pc build: pin Qt6_DIR so system Qt 6.2.x (apt) is not picked up.
     if [[ -n "$QT_PREFIX" ]]; then
         CMAKE_EXTRA_ARGS+=("-DCMAKE_PREFIX_PATH=${QT_PREFIX}")
         Qt6_CONFIG="${QT_PREFIX}/lib/cmake/Qt6/Qt6Config.cmake"
@@ -335,13 +335,13 @@ echo
 echo "To deploy to /opt/car-ui run:"
 echo "  ./scripts/deploy.sh --target ${TARGET}"
 
-if [[ "$TARGET" == "rpi5" && "$BUILD_CLUSTER_UI" == "OFF" ]]; then
+if [[ "$TARGET" == "rpi" && "$BUILD_CLUSTER_UI" == "OFF" ]]; then
     echo
-    warn "cluster-ui was NOT built (no RPi5 sysroot found on this machine)."
+    warn "cluster-ui was NOT built (no RPi sysroot found on this machine)."
     echo "  To enable cross-compilation of cluster-ui:"
-    echo "    1. Create a sysroot by copying the RPi5 filesystem:"
-    echo "         mkdir -p ~/sdk/rpi5/root"
-    echo "         rsync -av --rsync-path='sudo rsync' ${USER}@192.168.10.10:/usr ~/sdk/rpi5/root/"
-    echo "         rsync -av --rsync-path='sudo rsync' ${USER}@192.168.10.10:/lib ~/sdk/rpi5/root/"
-    echo "    2. Re-run this script (sysroot is auto-detected at ~/sdk/rpi5/root)."
+    echo "    1. Create a sysroot by copying the RPi filesystem:"
+    echo "         mkdir -p ~/sdk/rpi/root"
+    echo "         rsync -av --rsync-path='sudo rsync' ${USER}@192.168.10.10:/usr ~/sdk/rpi/root/"
+    echo "         rsync -av --rsync-path='sudo rsync' ${USER}@192.168.10.10:/lib ~/sdk/rpi/root/"
+    echo "    2. Re-run this script (sysroot is auto-detected at ~/sdk/rpi/root)."
 fi

@@ -4,3 +4,6 @@
 [submodule "cluster-ui"]
 	path = src/cluster-ui
 	url = https://github.com/aananthcn/cluster-ui.git
+[submodule "src/SocketCanGW"]
+	path = src/SocketCanGW
+	url = https://github.com/aananthcn/SocketCanGW.git

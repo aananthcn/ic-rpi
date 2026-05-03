@@ -1,13 +1,13 @@
 # Static IP Configuration for Raspberry Pi 5 (Android AOSP)
 
 ## Overview
-Configure a persistent static IP address on `eth0` for RPi5 running Android AOSP/Automotive.
+Configure a persistent static IP address on `eth0` for RPi running Android AOSP/Automotive.
 
 ---
 
 ## Step 1 — Create the shell script
 
-Create `device/brcm/rpi5/eth_static.sh`:
+Create `device/brcm/rpi/eth_static.sh`:
 
 ```bash
 #!/vendor/bin/sh
@@ -25,7 +25,7 @@ sleep 10
 
 ## Step 2 — Create the init rc file
 
-Create `device/brcm/rpi5/eth_static.rc`:
+Create `device/brcm/rpi/eth_static.rc`:
 
 ```rc
 service vendor.eth_static /vendor/bin/sh /vendor/bin/eth_static.sh
@@ -46,14 +46,14 @@ on property:sys.boot_completed=1
 
 ## Step 3 — Create SELinux policy
 
-Append to `device/brcm/rpi5/sepolicy/file_contexts`:
+Append to `device/brcm/rpi/sepolicy/file_contexts`:
 
 ```
 # Ethernet static IP script
 /vendor/bin/eth_static\.sh    u:object_r:vendor_shell_exec:s0
 ```
 
-Create `device/brcm/rpi5/sepolicy/vendor_eth_static.te`:
+Create `device/brcm/rpi/sepolicy/vendor_eth_static.te`:
 
 ```
 type vendor_eth_static, domain;
@@ -66,12 +66,12 @@ init_daemon_domain(vendor_eth_static)
 
 ## Step 4 — Register files in device.mk
 
-In `device/brcm/rpi5/device.mk`, add:
+In `device/brcm/rpi/device.mk`, add:
 
 ```makefile
 PRODUCT_COPY_FILES += \
-    device/brcm/rpi5/eth_static.sh:$(TARGET_COPY_OUT_VENDOR)/bin/eth_static.sh \
-    device/brcm/rpi5/eth_static.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/eth_static.rc
+    device/brcm/rpi/eth_static.sh:$(TARGET_COPY_OUT_VENDOR)/bin/eth_static.sh \
+    device/brcm/rpi/eth_static.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/eth_static.rc
 ```
 
 > **Note:** Place `eth_static.rc` in `/vendor/etc/init/` directly — **not** in the `hw/` subdirectory. Files in `hw/` are parsed by `vendor_init` which cannot register services. Files directly in `/vendor/etc/init/` are parsed by system init.
@@ -115,7 +115,7 @@ adb shell getprop init.svc.vendor.eth_static
 adb shell ifconfig eth0
 # Expected: inet addr:192.168.10.20
 
-# Reachable from host
+# Reachable from pc
 ping 192.168.10.20
 ```
 
@@ -125,7 +125,7 @@ ping 192.168.10.20
 
 | What failed | Why | Fix |
 |---|---|---|
-| Modifying `ramdisk/init.rpi5.rc` | RPi5 uses vendor init, not ramdisk | Use `/vendor/etc/init/` |
+| Modifying `ramdisk/init.rpi.rc` | RPi uses vendor init, not ramdisk | Use `/vendor/etc/init/` |
 | Placing rc in `/vendor/etc/init/hw/` | Parsed by `vendor_init`, cannot register services | Place directly in `/vendor/etc/init/` |
 | Missing `vendor.` prefix on service name | SELinux policy requires it for vendor services | Rename to `vendor.eth_static` |
 | Missing `seclabel` | Init refuses domain transition without explicit label | Add `seclabel u:r:vendor_eth_static:s0` |

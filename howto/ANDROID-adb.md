@@ -26,7 +26,7 @@ ADB debugging must be enabled via the Android UI before it can be used.
 Add the following to your device `.mk` file to ship with Developer Options and ADB pre-enabled, so you never need the UI tap:
 
 ```makefile
-# device/brcm/rpi5/aosp_rpi5_car.mk
+# device/brcm/rpi/aosp_rpi_car.mk
 PRODUCT_SYSTEM_PROPERTIES += \
     ro.debuggable=1 \
     persist.service.adb.enable=1 \
@@ -42,7 +42,7 @@ PRODUCT_SYSTEM_PROPERTIES += \
 In your device Makefile, set the following properties so the TCP port persists across reboots:
 
 ```makefile
-# device/brcm/rpi5/aosp_rpi5_car.mk
+# device/brcm/rpi/aosp_rpi_car.mk
 PRODUCT_SYSTEM_PROPERTIES += \
     persist.adb.tcp.port=5555 \
     persist.service.adb.enable=1
@@ -56,7 +56,7 @@ PRODUCT_SYSTEM_PROPERTIES += \
 
 The `adbd` daemon is started by USB init triggers by default. For TCP/IP ADB to activate automatically on boot, you must add property-based triggers to your device init file.
 
-Edit `device/brcm/rpi5/ramdisk/init.rpi5.rc` and add the following blocks:
+Edit `device/brcm/rpi/ramdisk/init.rpi.rc` and add the following blocks:
 
 ```rc
 # Restart adbd when the TCP port property is set at runtime
@@ -89,7 +89,7 @@ on property:sys.boot_completed=1 && property:persist.adb.tcp.port=5555
 After making the above source changes, rebuild the affected images:
 
 ```bash
-# Rebuild vendor image (contains init.rpi5.rc via ramdisk)
+# Rebuild vendor image (contains init.rpi.rc via ramdisk)
 make vendorimage -j$(nproc)
 
 # Flash to device
@@ -101,7 +101,7 @@ Or pull the SD Card out, and do the following:
 
 ```bash
 sudo umount /dev/sdc*
-sudo dd if=out/target/product/rpi5/vendor.img of=/dev/sdc6 bs=1M status=progress conv=fsync
+sudo dd if=out/target/product/rpi/vendor.img of=/dev/sdc6 bs=1M status=progress conv=fsync
 sync
 sudo eject /dev/sdc 
 ```
@@ -164,7 +164,7 @@ If this works but does not survive reboot, the init trigger in Section 1.3 is mi
 
 | File | Change |
 |------|--------|
-| `device/brcm/rpi5/aosp_rpi5_car.mk` | Add `persist.adb.tcp.port`, `persist.service.adb.enable` to `PRODUCT_SYSTEM_PROPERTIES` |
-| `device/brcm/rpi5/ramdisk/init.rpi5.rc` | Add `on property:` triggers to restart `adbd` on boot and on property change |
+| `device/brcm/rpi/aosp_rpi_car.mk` | Add `persist.adb.tcp.port`, `persist.service.adb.enable` to `PRODUCT_SYSTEM_PROPERTIES` |
+| `device/brcm/rpi/ramdisk/init.rpi.rc` | Add `on property:` triggers to restart `adbd` on boot and on property change |
 
 ---
