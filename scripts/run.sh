@@ -17,6 +17,7 @@ DEPLOY_ROOT="/opt/car-ui"
 VHAL_BIN="${DEPLOY_ROOT}/bin/vhal-core"
 VHAL_GTW="${DEPLOY_ROOT}/bin/vhal-gateway"
 ICUI_BIN="${DEPLOY_ROOT}/bin/cluster-ui"
+SCAN_GTW="${DEPLOY_ROOT}/bin/socket-can-gw"
 
 RPI_IP="${RPI_IP:-192.168.10.10}"
 RPI_USER="${USER}"
@@ -86,6 +87,12 @@ run_host() {
     [[ -x "$VHAL_BIN" ]] || fail "${VHAL_BIN} not found. Run ./scripts/deploy.sh --target pc first."
     [[ -x "$ICUI_BIN" ]] || fail "${ICUI_BIN} not found. Run ./scripts/deploy.sh --target pc first."
     [[ -x "$VHAL_GTW" ]] || fail "${VHAL_GTW} not found. Run ./scripts/deploy.sh --target pc first."
+    [[ -x "$SCAN_GTW" ]] || fail "${SCAN_GTW} not found. Run ./scripts/deploy.sh --target pc first."
+
+    info "Starting socket-can-gw ..."
+    "${SCAN_GTW}" &
+    SCAN_GTW_PID=$!
+    success "socket-can-gw started (PID ${SCAN_GTW_PID})"
 
     info "Starting vhal-core ..."
     "${VHAL_BIN}" &
@@ -107,6 +114,8 @@ run_host() {
         wait "$VHAL_BIN_PID" 2>/dev/null || true
         kill "$VHAL_GTW_PID" 2>/dev/null || true
         wait "$VHAL_GTW_PID" 2>/dev/null || true
+        kill "$SCAN_GTW_PID" 2>/dev/null || true
+        wait "$SCAN_GTW_PID" 2>/dev/null || true
         success "Stopped."
     }
     trap cleanup EXIT INT TERM
@@ -144,6 +153,14 @@ run_rpi() {
         "[[ -x '${ICUI_BIN}' ]] || { echo '[ERROR] ${ICUI_BIN} not found on RPi. Run deploy.sh first.' >&2; exit 1; }"
     ssh "${RPI_USER}@${RPI_IP}" \
         "[[ -x '${VHAL_GTW}' ]] || { echo '[ERROR] ${VHAL_GTW} not found on RPi. Run deploy.sh first.' >&2; exit 1; }"
+    ssh "${RPI_USER}@${RPI_IP}" \
+        "[[ -x '${SCAN_GTW}' ]] || { echo '[ERROR] ${SCAN_GTW} not found on RPi. Run deploy.sh first.' >&2; exit 1; }"
+
+    # Start socket-can-gw in the background on the device, capture its PID
+    info "Starting socket-can-gw on RPi ..."
+    REMOTE_SCAN_GTW_PID=$(ssh "${RPI_USER}@${RPI_IP}" \
+        "nohup '${SCAN_GTW}' >/tmp/socket-can-gw.log 2>&1 & echo \$!")
+    success "socket-can-gw started on RPi (PID ${REMOTE_SCAN_GTW_PID})"
 
     # Start vhal-core in the background on the device, capture its PID
     info "Starting vhal-core on RPi ..."
@@ -165,6 +182,8 @@ run_rpi() {
             "kill ${REMOTE_VHAL_BIN_PID} 2>/dev/null || true" 2>/dev/null || true
         ssh "${RPI_USER}@${RPI_IP}" \
             "kill ${REMOTE_VHAL_GTW_PID} 2>/dev/null || true" 2>/dev/null || true
+        ssh "${RPI_USER}@${RPI_IP}" \
+            "kill ${REMOTE_SCAN_GTW_PID} 2>/dev/null || true" 2>/dev/null || true
         success "vhal-core, vhal-gateway are stopped."
     }
     trap cleanup_rpi EXIT INT TERM

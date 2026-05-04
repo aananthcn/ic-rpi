@@ -1,0 +1,30 @@
+# car-ui.service — Autostart the instrument cluster stack at RPi boot
+#
+# Startup order (managed by car-ui-start.sh):
+#   socket-can-gw -> (1s) -> vhal-core -> (1s) -> vhal-gateway -> cluster-ui
+#
+# cluster-ui is the tracked process (exec'd by the start script). When it
+# exits, systemd kills the remaining background processes via cgroup cleanup.
+#
+# Useful commands:
+#   sudo systemctl restart car-ui.service   — restart the full stack
+#   journalctl -u car-ui.service -f         — follow service logs
+#   tail -f /tmp/socket-can-gw.log          — per-process log
+#   tail -f /tmp/vhal-core.log
+#   tail -f /tmp/vhal-gateway.log
+
+[Unit]
+Description=Car Instrument Cluster UI Stack
+After=can-setup.service
+Requires=can-setup.service
+
+[Service]
+Type=simple
+Environment=QT_QPA_PLATFORM=eglfs
+ExecStart=/opt/car-ui/bin/car-ui-start.sh
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

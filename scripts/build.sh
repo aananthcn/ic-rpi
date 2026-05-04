@@ -205,6 +205,17 @@ fi
 # ---------------------------------------------------------------------------
 info "Configuring cmake (staging: ${STAGE_DIR})..."
 
+# If the build directory was previously configured with a different generator
+# (e.g. Unix Makefiles), cmake will refuse to switch to Ninja. Detect this and
+# wipe only the cmake build tree — Conan output and staged artifacts are kept.
+if [[ -f "${CMAKE_BUILD_DIR}/CMakeCache.txt" ]]; then
+    cached_gen=$(grep -s "^CMAKE_GENERATOR:INTERNAL=" "${CMAKE_BUILD_DIR}/CMakeCache.txt" | cut -d= -f2)
+    if [[ "$cached_gen" != "Ninja" ]]; then
+        warn "Existing build dir uses '${cached_gen}', switching to Ninja — wiping ${CMAKE_BUILD_DIR}"
+        rm -rf "${CMAKE_BUILD_DIR}"
+    fi
+fi
+
 # ---------------------------------------------------------------------------
 # Sysroot detection (rpi only)
 #
@@ -232,9 +243,24 @@ if [[ -z "$BUILD_CLUSTER_UI" ]]; then
     esac
 fi
 
-[[ "$BUILD_CLUSTER_UI" == "ON" ]] \
-    && info "cluster-ui: enabled" \
-    || warn "cluster-ui: disabled (no sysroot found — pass --sysroot <path> to enable)"
+if [[ "$BUILD_CLUSTER_UI" == "ON" ]]; then
+    info "cluster-ui: enabled"
+else
+    echo
+    echo "========================================"
+    echo "  WARNING: cluster-ui will NOT be built"
+    echo "========================================"
+    echo "  Reason : No RPi sysroot found at ~/sdk/rpi/root"
+    echo "  Fix    : Copy the RPi filesystem to create one:"
+    echo "    mkdir -p ~/sdk/rpi/root"
+    echo "    rsync -av --rsync-path='sudo rsync' \\"
+    echo "      ${USER}@192.168.10.10:/usr ~/sdk/rpi/root/"
+    echo "    rsync -av --rsync-path='sudo rsync' \\"
+    echo "      ${USER}@192.168.10.10:/lib ~/sdk/rpi/root/"
+    echo "  Then re-run this script (sysroot is auto-detected)."
+    echo "========================================"
+    echo
+fi
 
 # ---------------------------------------------------------------------------
 # CMake extra args
@@ -270,6 +296,7 @@ else
 fi
 
 cmake -B "${CMAKE_BUILD_DIR}" \
+    -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="${CONAN_DIR}/conan_toolchain.cmake" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="${STAGE_DIR}" \
@@ -337,11 +364,17 @@ echo "  ./scripts/deploy.sh --target ${TARGET}"
 
 if [[ "$TARGET" == "rpi" && "$BUILD_CLUSTER_UI" == "OFF" ]]; then
     echo
-    warn "cluster-ui was NOT built (no RPi sysroot found on this machine)."
-    echo "  To enable cross-compilation of cluster-ui:"
-    echo "    1. Create a sysroot by copying the RPi filesystem:"
-    echo "         mkdir -p ~/sdk/rpi/root"
-    echo "         rsync -av --rsync-path='sudo rsync' ${USER}@192.168.10.10:/usr ~/sdk/rpi/root/"
-    echo "         rsync -av --rsync-path='sudo rsync' ${USER}@192.168.10.10:/lib ~/sdk/rpi/root/"
-    echo "    2. Re-run this script (sysroot is auto-detected at ~/sdk/rpi/root)."
+    echo "========================================"
+    echo "  WARNING: cluster-ui was NOT built"
+    echo "========================================"
+    echo "  bin/cluster-ui is missing from the staging area."
+    echo "  Reason : No RPi sysroot found at ~/sdk/rpi/root"
+    echo "  Fix    : Copy the RPi filesystem to create one:"
+    echo "    mkdir -p ~/sdk/rpi/root"
+    echo "    rsync -av --rsync-path='sudo rsync' \\"
+    echo "      ${USER}@192.168.10.10:/usr ~/sdk/rpi/root/"
+    echo "    rsync -av --rsync-path='sudo rsync' \\"
+    echo "      ${USER}@192.168.10.10:/lib ~/sdk/rpi/root/"
+    echo "  Then re-run: ./scripts/build.sh --target rpi"
+    echo "========================================"
 fi

@@ -60,7 +60,7 @@ setup_deploy_dirs() {
 # ---------------------------------------------------------------------------
 # Step 2: Check and install pc build dependencies
 # ---------------------------------------------------------------------------
-HOST_DEPS=(
+PC_DEPS=(
     git
     cmake
     ninja-build
@@ -75,11 +75,11 @@ HOST_DEPS=(
     # Qt6 is NOT installed via apt — use the Qt Online Installer (see README.md)
 )
 
-check_host_deps() {
+check_pc_deps() {
     info "Checking pc build dependencies..."
 
     local missing=()
-    for dep in "${HOST_DEPS[@]}"; do
+    for dep in "${PC_DEPS[@]}"; do
         if ! dpkg -s "$dep" &>/dev/null && ! command -v "$dep" &>/dev/null; then
             missing+=("$dep")
         fi
@@ -95,7 +95,7 @@ check_host_deps() {
     info "Installing missing packages via apt..."
     sudo apt-get update -qq
     sudo apt-get install -y "${missing[@]}"
-    success "Host dependencies installed."
+    success "PC dependencies installed."
 }
 
 # ---------------------------------------------------------------------------
@@ -104,6 +104,7 @@ check_host_deps() {
 SUBMODULES=(
     "vhal-core|https://github.com/aananthcn/vhal-core.git"
     "cluster-ui|https://github.com/aananthcn/cluster-ui.git"
+    "SocketCanGW|https://github.com/aananthcn/SocketCanGW.git"
 )
 
 setup_submodules() {
@@ -158,7 +159,7 @@ install_conan() {
 # ---------------------------------------------------------------------------
 # Step 5: Generate pc Conan profile
 # ---------------------------------------------------------------------------
-setup_host_profile() {
+setup_pc_profile() {
     info "Generating pc Conan profile..."
 
     local profiles_dir="${PROJECT_ROOT}/profiles"
@@ -196,7 +197,7 @@ tools.cmake.cmaketoolchain:generator=Ninja
 user.car_ui:install_prefix=/opt/car-ui
 EOF
 
-    success "Host profile written to profiles/pc."
+    success "PC profile written to profiles/pc."
 }
 
 # ---------------------------------------------------------------------------
@@ -226,13 +227,13 @@ main() {
 
     setup_deploy_dirs
     echo
-    check_host_deps
+    check_pc_deps
     echo
     setup_submodules
     echo
     install_conan
     echo
-    setup_host_profile
+    setup_pc_profile
     echo
     setup_rpi_profile
     echo

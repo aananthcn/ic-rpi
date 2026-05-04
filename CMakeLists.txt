@@ -33,6 +33,18 @@ message(STATUS "ic-rpi runtime prefix : ${CAR_UI_RUNTIME_PREFIX}")
 # duplicate-target errors.
 # ──────────────────────────────────────────────────────────────────────────────
 include(ExternalProject)
+include(ProcessorCount)
+
+# How many cores to hand each inner build.  ExternalProject sub-builds do not
+# inherit --parallel from the outer cmake invocation, so we pass it explicitly
+# via BUILD_COMMAND.  USES_TERMINAL_BUILD is intentionally omitted: that flag
+# puts builds in Ninja's 'console' pool (depth=1), which forces SocketCanGW
+# and vhal-core to serialize even though they are independent.
+ProcessorCount(N_CORES)
+if(NOT N_CORES OR N_CORES EQUAL 0)
+    set(N_CORES 4)  # safe fallback when ProcessorCount cannot detect
+endif()
+message(STATUS "Parallel build jobs : ${N_CORES}")
 
 # Arguments forwarded to every sub-project cmake invocation.
 #
@@ -155,8 +167,37 @@ ExternalProject_Add(vhal-core
         # location, not the staging or source location.
         -DVHAL_CONFIG_ROOT=${CAR_UI_RUNTIME_PREFIX}/etc/vhal
         -DGATEWAY_CONFIG_ROOT=${CAR_UI_RUNTIME_PREFIX}/etc/vhal
+    BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> -- -j${N_CORES}
     BUILD_ALWAYS ON
+    # vhal-core is the root dependency; nothing runs in parallel with it
+    # (SocketCanGW and cluster-ui both DEPENDS vhal-core).  USES_TERMINAL_BUILD
+    # is safe here and makes the inner Ninja progress visible so build
+    # parallelism can be confirmed.
     USES_TERMINAL_BUILD ON
+)
+
+# ── SocketCanGW ───────────────────────────────────────────────────────────────
+# CAN FD → VHAL bridge. Reads raw CAN frames from can0/can1 (SocketCAN kernel
+# interfaces) and pushes decoded vehicle properties into vhal-core via gRPC
+# SetValues. It is a gRPC client of vhal-core, not a server.
+# No Qt dependency — cross-compiles with only the Conan toolchain (gRPC, protobuf).
+#
+# Must be declared AFTER vhal-core so the DEPENDS target already exists, and
+# vhal-core's installed VehicleServer proto stubs are present in the staging
+# area before SocketCanGW is configured.
+#
+# Staging layout (./build/install/):
+#   bin/socket-can-gw      <- gateway executable
+# ──────────────────────────────────────────────────────────────────────────────
+ExternalProject_Add(SocketCanGW
+    SOURCE_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/src/SocketCanGW
+    BINARY_DIR  ${CMAKE_CURRENT_BINARY_DIR}/SocketCanGW
+    INSTALL_DIR ${CMAKE_INSTALL_PREFIX}
+    CMAKE_ARGS
+        ${_COMMON_CMAKE_ARGS}
+    BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> -- -j${N_CORES}
+    BUILD_ALWAYS ON
+    DEPENDS vhal-core
 )
 
 # ── cluster-ui ────────────────────────────────────────────────────────────────
@@ -185,8 +226,8 @@ if(BUILD_CLUSTER_UI)
         CMAKE_ARGS
             ${_COMMON_CMAKE_ARGS}
             ${_CLUSTER_UI_QT_ARGS}
+        BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> -- -j${N_CORES}
         BUILD_ALWAYS ON
-        USES_TERMINAL_BUILD ON
         # cluster-ui links against vhal-core targets; build vhal-core first so
         # the generated proto/grpc headers are present when cluster-ui configures.
         DEPENDS vhal-core

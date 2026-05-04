@@ -1,0 +1,31 @@
+# can-setup.service — Bring up CAN FD interfaces for Waveshare 2-CH CAN FD HAT
+#
+# Hardware: Waveshare 2-CH CAN FD HAT (MCP2518FD via SPI)
+#   https://www.waveshare.com/wiki/2-CH_CAN_FD_HAT
+#
+# Prerequisites in /boot/config.txt on RPi:
+#   dtoverlay=mcp251xfd,spi0-0,interrupt=25
+#   dtoverlay=mcp251xfd,spi1-0,interrupt=24
+#
+# Adjust bitrate/dbitrate to match your CAN bus.
+# Default: 500 kbps nominal, 2 Mbps data (CAN FD).
+# Classic CAN only: drop "dbitrate 2000000 fd on" and use just "bitrate 500000".
+
+[Unit]
+Description=CAN FD interface setup (Waveshare 2-CH CAN FD HAT)
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Bring interfaces down first so re-running the service never hits "Device or resource busy".
+# The leading '-' tells systemd to ignore failures (safe if interface is already down).
+ExecStartPre=-/sbin/ip link set can0 down
+ExecStartPre=-/sbin/ip link set can1 down
+ExecStart=/sbin/ip link set can0 up type can bitrate 500000 dbitrate 2000000 fd on
+ExecStart=/sbin/ip link set can1 up type can bitrate 500000 dbitrate 2000000 fd on
+ExecStop=/sbin/ip link set can0 down
+ExecStop=/sbin/ip link set can1 down
+
+[Install]
+WantedBy=multi-user.target

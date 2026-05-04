@@ -82,9 +82,9 @@ info "Staging area : ${STAGE_DIR}"
 info "Deploy root  : ${DEPLOY_ROOT}"
 
 # ---------------------------------------------------------------------------
-# deploy_host — copy to /opt/car-ui on the local machine
+# deploy_pc — copy to /opt/car-ui on the local machine
 # ---------------------------------------------------------------------------
-deploy_host() {
+deploy_pc() {
     echo
     info "Deploying to pc at ${DEPLOY_ROOT} ..."
     echo "  This will copy the following to ${DEPLOY_ROOT}:"
@@ -131,6 +131,12 @@ deploy_rpi() {
     fi
     success "SSH connection OK."
 
+    # Stop the running stack so binaries are not locked during overwrite
+    info "Stopping car-ui service on RPi (if running) ..."
+    ssh "${RPI_USER}@${RPI_IP}" \
+        "sudo systemctl stop car-ui.service 2>/dev/null || true"
+    success "car-ui service stopped."
+
     # Ensure /opt/car-ui structure exists on RPi (sudo on remote)
     info "Ensuring ${DEPLOY_ROOT} exists on RPi..."
     ssh "${RPI_USER}@${RPI_IP}" \
@@ -154,12 +160,23 @@ deploy_rpi() {
     echo "  Binaries : ${DEPLOY_ROOT}/bin/"
     echo "  Libraries: ${DEPLOY_ROOT}/lib/"
     echo "  Configs  : ${DEPLOY_ROOT}/etc/"
+
+    # Restart the service with the newly deployed binaries
+    info "Restarting car-ui service with new binaries ..."
+    if ssh "${RPI_USER}@${RPI_IP}" \
+           "sudo systemctl start car-ui.service 2>/dev/null"; then
+        success "car-ui service restarted."
+        info "Run './scripts/run.sh --target rpi' first if this is the initial deploy."
+    else
+        warn "car-ui.service is not installed yet."
+        warn "Run './scripts/run.sh --target rpi' to install it, then redeploy."
+    fi
 }
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 case "$TARGET" in
-    pc) deploy_host ;;
+    pc) deploy_pc ;;
     rpi) deploy_rpi ;;
 esac
