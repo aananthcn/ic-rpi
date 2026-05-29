@@ -108,14 +108,12 @@ run_host() {
     success "vhal-core started (PID ${VHAL_GTW_PID})"
 
     cleanup() {
+        trap '' INT TERM TSTP   # ignore further signals — let cleanup finish
+        trap - EXIT
         echo
         info "Stopping cluster-ui, vhal-gateway and vhal-core ..."
-        kill "$VHAL_BIN_PID" 2>/dev/null || true
-        wait "$VHAL_BIN_PID" 2>/dev/null || true
-        kill "$VHAL_GTW_PID" 2>/dev/null || true
-        wait "$VHAL_GTW_PID" 2>/dev/null || true
-        kill "$SCAN_GTW_PID" 2>/dev/null || true
-        wait "$SCAN_GTW_PID" 2>/dev/null || true
+        kill -9 "$VHAL_BIN_PID" "$VHAL_GTW_PID" "$SCAN_GTW_PID" 2>/dev/null || true
+        wait "$VHAL_BIN_PID" "$VHAL_GTW_PID" "$SCAN_GTW_PID" 2>/dev/null || true
         success "Stopped."
     }
     trap cleanup EXIT INT TERM
@@ -156,26 +154,34 @@ run_rpi() {
     ssh "${RPI_USER}@${RPI_IP}" \
         "[[ -x '${SCAN_GTW}' ]] || { echo '[ERROR] ${SCAN_GTW} not found on RPi. Run deploy.sh first.' >&2; exit 1; }"
 
+    # Log paths scoped to the remote user to avoid permission conflicts if the
+    # files were previously created by root (e.g. after a sudo run).
+    REMOTE_SCAN_LOG="/tmp/${RPI_USER}-socket-can-gw.log"
+    REMOTE_VHAL_LOG="/tmp/${RPI_USER}-vhal-core.log"
+    REMOTE_GTW_LOG="/tmp/${RPI_USER}-vhal-gateway.log"
+
     # Start socket-can-gw in the background on the device, capture its PID
     info "Starting socket-can-gw on RPi ..."
     REMOTE_SCAN_GTW_PID=$(ssh "${RPI_USER}@${RPI_IP}" \
-        "nohup '${SCAN_GTW}' >/tmp/socket-can-gw.log 2>&1 & echo \$!")
+        "nohup '${SCAN_GTW}' >'${REMOTE_SCAN_LOG}' 2>&1 & echo \$!")
     success "socket-can-gw started on RPi (PID ${REMOTE_SCAN_GTW_PID})"
 
     # Start vhal-core in the background on the device, capture its PID
     info "Starting vhal-core on RPi ..."
     REMOTE_VHAL_BIN_PID=$(ssh "${RPI_USER}@${RPI_IP}" \
-        "nohup '${VHAL_BIN}' >/tmp/vhal-core.log 2>&1 & echo \$!")
+        "nohup '${VHAL_BIN}' >'${REMOTE_VHAL_LOG}' 2>&1 & echo \$!")
     success "vhal-core started on RPi (PID ${REMOTE_VHAL_BIN_PID})"
 
     sleep 1
 
     info "Starting vhal-gateway on RPi ..."
     REMOTE_VHAL_GTW_PID=$(ssh "${RPI_USER}@${RPI_IP}" \
-        "nohup '${VHAL_GTW}' >/tmp/vhal-gateway.log 2>&1 & echo \$!")
+        "nohup '${VHAL_GTW}' >'${REMOTE_GTW_LOG}' 2>&1 & echo \$!")
     success "vhal-core started on RPi (PID ${REMOTE_VHAL_GTW_PID})"
 
     cleanup_rpi() {
+        trap '' INT TERM TSTP
+        trap - EXIT
         echo
         info "Stopping vhal-core, vhal-gateway on RPi (PID ${REMOTE_VHAL_BIN_PID}, ${REMOTE_VHAL_GTW_PID}) ..."
         ssh "${RPI_USER}@${RPI_IP}" \
@@ -189,7 +195,7 @@ run_rpi() {
     trap cleanup_rpi EXIT INT TERM
 
     info "Starting cluster-ui on RPi (QT_QPA_PLATFORM=${QT_PLATFORM}) ..."
-    info "(vhal-core log: ssh ${RPI_USER}@${RPI_IP} tail -f /tmp/vhal-core.log)"
+    info "(vhal-core log: ssh ${RPI_USER}@${RPI_IP} tail -f ${REMOTE_VHAL_LOG})"
     ssh -t "${RPI_USER}@${RPI_IP}" \
         "QT_QPA_PLATFORM='${QT_PLATFORM}' '${ICUI_BIN}'"
     # cluster-ui exiting falls through to cleanup_rpi above.
