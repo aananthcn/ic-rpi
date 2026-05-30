@@ -85,8 +85,15 @@ endif()
 #                     sysroot, bypassing any system search-path ambiguity.
 set(_CLUSTER_UI_QT_ARGS)
 
+# Always add the staging install dir so cluster-ui's find_package(vhal-types)
+# and find_package(vhal-ipc-grpc) pick up the cmake configs installed by
+# vhal-core's ExternalProject_Add before cluster-ui is configured.
 if(CMAKE_PREFIX_PATH)
-    list(APPEND _CLUSTER_UI_QT_ARGS "-DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH}")
+    list(APPEND _CLUSTER_UI_QT_ARGS
+        "-DCMAKE_PREFIX_PATH=${CMAKE_PREFIX_PATH};${CMAKE_INSTALL_PREFIX}")
+else()
+    list(APPEND _CLUSTER_UI_QT_ARGS
+        "-DCMAKE_PREFIX_PATH=${CMAKE_INSTALL_PREFIX}")
 endif()
 if(Qt6_DIR)
     list(APPEND _CLUSTER_UI_QT_ARGS "-DQt6_DIR=${Qt6_DIR}")
